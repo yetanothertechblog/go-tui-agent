@@ -36,10 +36,10 @@ var ListFilesTool = llm.Tool{
 	},
 }
 
-func ExecuteListFiles(argsJSON string, workingDir string) string {
+func ExecuteListFiles(argsJSON string, workingDir string) (string, error) {
 	var args ListFilesArgs
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return fmt.Sprintf("error: invalid arguments: %v", err)
+		return "", NewToolErrorWithDetails(ErrInvalidArguments, "invalid arguments", err.Error())
 	}
 
 	path := args.Path
@@ -51,10 +51,10 @@ func ExecuteListFiles(argsJSON string, workingDir string) string {
 
 	info, err := os.Stat(path)
 	if err != nil {
-		return fmt.Sprintf("error: %v", err)
+		return "", NewToolErrorWithDetails(ErrFileNotFound, "path not found", err.Error())
 	}
 	if !info.IsDir() {
-		return fmt.Sprintf("error: %s is not a directory", args.Path)
+		return "", NewToolError(ErrInvalidArguments, fmt.Sprintf("%s is not a directory", args.Path))
 	}
 
 	var sb strings.Builder
@@ -78,7 +78,7 @@ func ExecuteListFiles(argsJSON string, workingDir string) string {
 	} else {
 		entries, err := os.ReadDir(path)
 		if err != nil {
-			return fmt.Sprintf("error: %v", err)
+			return "", NewToolErrorWithDetails(ErrFileNotFound, "failed to read directory", err.Error())
 		}
 		for _, entry := range entries {
 			if entry.Name() == ".git" {
@@ -92,5 +92,5 @@ func ExecuteListFiles(argsJSON string, workingDir string) string {
 		}
 	}
 
-	return sb.String()
+	return sb.String(), nil
 }

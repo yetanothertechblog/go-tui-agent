@@ -10,11 +10,12 @@ import (
 	"strings"
 
 	"github.com/joho/godotenv"
+	"go-tui/config"
 )
 
 const (
-	apiURL    = "https://api.z.ai/api/paas/v4/chat/completions"
-	modelName = "glm-4.5-air"
+	apiURL    = config.APIURL
+	modelName = config.ModelName
 )
 
 var apiKey string

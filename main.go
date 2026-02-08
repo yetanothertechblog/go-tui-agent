@@ -1,20 +1,24 @@
 package main
 
+
+
 import (
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"go-tui/config"
 	"go-tui/conversation"
 	"go-tui/llm"
 	"go-tui/tui"
 )
 
 func main() {
-	resume := flag.Bool("resume", false, "resume a conversation (optionally pass UUID as positional arg)")
+	resume := flag.Bool("resume", false, "resume a conversation (pass UUID as positional arg for specific conversation)")
 	flag.Parse()
 
 	var resumeID string
@@ -34,11 +38,11 @@ func main() {
 	}
 
 	logDir := filepath.Join(workingDir, "log")
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
+	if err := os.MkdirAll(logDir, config.DirPermissions); err != nil {
 		fmt.Printf("Error creating log dir: %v\n", err)
 		os.Exit(1)
 	}
-	logFile, err := os.OpenFile(filepath.Join(logDir, "debug.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logFile, err := os.OpenFile(filepath.Join(logDir, "debug.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, config.LogPermissions)
 	if err != nil {
 		fmt.Printf("Error opening log file: %v\n", err)
 		os.Exit(1)
@@ -51,7 +55,22 @@ func main() {
 	convDir := conversation.Dir(workingDir)
 	var conv *conversation.Data
 
-	if resumeID != "" {
+	if *resume && resumeID == "" {
+		// -resume with no UUID: load latest conversation
+		latestFile, err := conversation.LatestInDir(convDir)
+		if err != nil {
+			fmt.Printf("No conversations to resume.\n")
+			os.Exit(1)
+		}
+		resumeID = strings.TrimSuffix(latestFile, ".json")
+		path := filepath.Join(convDir, resumeID+".json")
+		conv, err = conversation.Load(path)
+		if err != nil {
+			fmt.Printf("Error loading conversation: %v\n", err)
+			os.Exit(1)
+		}
+		log.Printf("resumed latest conversation: %s", conv.ID)
+	} else if resumeID != "" {
 		// Explicit UUID provided: go run . -resume <uuid>
 		path := filepath.Join(convDir, resumeID+".json")
 		conv, err = conversation.Load(path)
@@ -60,33 +79,10 @@ func main() {
 			os.Exit(1)
 		}
 		log.Printf("resumed conversation: %s", conv.ID)
-	} else if *resume {
-		// -resume with no UUID: resume the latest
-		latest, err := conversation.LatestInDir(convDir)
-		if err != nil {
-			fmt.Printf("No conversations to resume.\n")
-			os.Exit(1)
-		}
-		conv, err = conversation.Load(filepath.Join(convDir, latest))
-		if err != nil {
-			fmt.Printf("Error loading conversation: %v\n", err)
-			os.Exit(1)
-		}
-		log.Printf("resumed latest conversation: %s", conv.ID)
 	} else {
-		// No flag: auto-resume latest or create new
-		latest, err := conversation.LatestInDir(convDir)
-		if err == nil {
-			conv, err = conversation.Load(filepath.Join(convDir, latest))
-			if err != nil {
-				fmt.Printf("Error loading conversation: %v\n", err)
-				os.Exit(1)
-			}
-			log.Printf("auto-resumed conversation: %s", conv.ID)
-		} else {
-			conv = conversation.New()
-			log.Printf("new conversation: %s", conv.ID)
-		}
+		// No resume ID: create new conversation
+		conv = conversation.New()
+		log.Printf("new conversation: %s", conv.ID)
 	}
 
 	m := tui.New(workingDir, conv)

@@ -1,2 +1,5 @@
 .env
 conversations/
+go-tui
+log/
+tmp/

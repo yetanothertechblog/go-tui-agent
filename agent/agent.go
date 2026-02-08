@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"go-tui/agent/tools"
+	"go-tui/config"
 	"go-tui/llm"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -19,6 +20,7 @@ type ToolCallMsg struct {
 type ResponseMsg struct {
 	Content string
 	Err     error
+	Denied  bool
 }
 
 type PermissionRequestMsg struct {
@@ -48,7 +50,7 @@ Rules:
 - Use the tools available to you when needed.
 - When reading files, use paths relative to the working directory unless an absolute path is given.`
 
-const maxToolRounds = 10
+const maxToolRounds = config.MaxToolRounds
 
 type Agent struct {
 	history      []llm.Message
@@ -93,6 +95,10 @@ func (a *Agent) requestPermission(toolName string, args string) PermissionDecisi
 	return decision
 }
 
+func (a *Agent) WorkingDir() string {
+	return a.workingDir
+}
+
 func (a *Agent) History() []llm.Message {
 	return a.history
 }
@@ -108,6 +114,9 @@ func (a *Agent) Send(userText string) tea.Cmd {
 	})
 
 	return func() tea.Msg {
+		consecutiveErrors := 0
+		const maxConsecutiveErrors = 3
+
 		for range maxToolRounds {
 			messages := make([]llm.Message, 0, len(a.history)+1)
 			messages = append(messages, llm.Message{
@@ -139,7 +148,6 @@ func (a *Agent) Send(userText string) tea.Cmd {
 
 			// Execute each tool call with permission check
 			for _, tc := range delta.ToolCalls {
-				log.Printf("tool call: %s(%s)", tc.Function.Name, tc.Function.Arguments)
 				command := tc.Function.Name + ": " + tc.Function.Arguments
 
 				decision := a.requestPermission(tc.Function.Name, tc.Function.Arguments)
@@ -156,10 +164,32 @@ func (a *Agent) Send(userText string) tea.Cmd {
 						Content:    result,
 						ToolCallID: tc.ID,
 					})
+
+					// Break the loop and return to allow user to add explanation
+					return ResponseMsg{Denied: true}
+				}
+
+				result, err := tools.Execute(tc.Function.Name, tc.Function.Arguments, a.workingDir)
+				if err != nil {
+					log.Printf("tool error: %v", err)
+					consecutiveErrors++
+					errMsg := err.Error()
+					if consecutiveErrors >= maxConsecutiveErrors {
+						errMsg += " (Too many consecutive errors. Stop retrying and tell the user what went wrong.)"
+					}
+					a.program.Send(ToolCallMsg{
+						Command: command,
+						Result:  errMsg,
+					})
+					a.history = append(a.history, llm.Message{
+						Role:       "tool",
+						Content:    errMsg,
+						ToolCallID: tc.ID,
+					})
 					continue
 				}
 
-				result := tools.Execute(tc.Function.Name, tc.Function.Arguments, a.workingDir)
+				consecutiveErrors = 0
 				log.Printf("tool result: %.200s", result)
 				a.program.Send(ToolCallMsg{
 					Command: command,

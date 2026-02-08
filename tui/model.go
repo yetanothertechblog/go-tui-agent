@@ -3,6 +3,8 @@ package tui
 import (
 	"encoding/json"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -11,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"go-tui/agent"
+	"go-tui/config"
 	"go-tui/conversation"
 	"go-tui/llm"
 )
@@ -23,6 +26,13 @@ const (
 	EntryError
 )
 
+type DiffData struct {
+	FilePath  string `json:"file_path"`
+	OldText   string `json:"old_text"`
+	NewText   string `json:"new_text"`
+	StartLine int    `json:"start_line,omitempty"`
+}
+
 type ChatEntry struct {
 	Type    EntryType `json:"type"`
 	Role    string    `json:"role,omitempty"`
@@ -30,6 +40,7 @@ type ChatEntry struct {
 	Command string    `json:"command,omitempty"`
 	Result  string    `json:"result,omitempty"`
 	Denied  bool      `json:"denied,omitempty"`
+	Diff    *DiffData `json:"diff,omitempty"`
 }
 
 type Model struct {
@@ -58,7 +69,7 @@ func New(workingDir string, conv *conversation.Data) Model {
 	ta.Placeholder = "Type a message..."
 	ta.Focus()
 	ta.ShowLineNumbers = false
-	ta.SetHeight(3)
+	ta.SetHeight(config.TextareaHeight)
 	ta.CharLimit = 0
 
 	s := spinner.New()
@@ -112,6 +123,103 @@ func (m *Model) saveConversation() {
 	}
 }
 
+func parseDiffFromToolCall(msg agent.ToolCallMsg, workingDir string) *DiffData {
+	name, argsJSON := splitCommand(msg.Command)
+
+	if msg.Denied {
+		return parseDiffFromArgs(name, argsJSON, workingDir)
+	}
+
+	if msg.Result == "" {
+		return nil
+	}
+
+	switch name {
+	case "edit_file", "write_file":
+		var r struct {
+			FilePath   string `json:"file_path"`
+			OldString  string `json:"old_string"`
+			NewString  string `json:"new_string"`
+			OldContent string `json:"old_content"`
+			NewContent string `json:"new_content"`
+			IsNewFile  bool   `json:"is_new_file"`
+		}
+		if json.Unmarshal([]byte(msg.Result), &r) != nil || r.FilePath == "" {
+			return parseDiffFromArgs(name, argsJSON, workingDir)
+		}
+		old := r.OldString + r.OldContent
+		new_ := r.NewString + r.NewContent
+		startLine := 1
+		if name == "edit_file" {
+			path := r.FilePath
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(workingDir, path)
+			}
+			if data, err := os.ReadFile(path); err == nil {
+				startLine = findStartLine(string(data), r.OldString)
+			}
+		}
+		return &DiffData{
+			FilePath:  r.FilePath,
+			OldText:   old,
+			NewText:   new_,
+			StartLine: startLine,
+		}
+	}
+	return nil
+}
+
+func parseDiffFromArgs(name, argsJSON, workingDir string) *DiffData {
+	switch name {
+	case "edit_file":
+		var args struct {
+			FilePath  string `json:"file_path"`
+			OldString string `json:"old_string"`
+			NewString string `json:"new_string"`
+		}
+		if json.Unmarshal([]byte(argsJSON), &args) != nil || args.FilePath == "" {
+			return nil
+		}
+		startLine := 1
+		path := args.FilePath
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(workingDir, path)
+		}
+		if data, err := os.ReadFile(path); err == nil {
+			startLine = findStartLine(string(data), args.OldString)
+		}
+		return &DiffData{
+			FilePath:  args.FilePath,
+			OldText:   args.OldString,
+			NewText:   args.NewString,
+			StartLine: startLine,
+		}
+
+	case "write_file":
+		var args struct {
+			FilePath string `json:"file_path"`
+			Content  string `json:"content"`
+		}
+		if json.Unmarshal([]byte(argsJSON), &args) != nil || args.FilePath == "" {
+			return nil
+		}
+		path := args.FilePath
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(workingDir, path)
+		}
+		d := &DiffData{
+			FilePath:  args.FilePath,
+			NewText:   args.Content,
+			StartLine: 1,
+		}
+		if data, err := os.ReadFile(path); err == nil {
+			d.OldText = string(data)
+		}
+		return d
+	}
+	return nil
+}
+
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(textarea.Blink, spinner.Tick)
 }
@@ -129,9 +237,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-		textareaHeight := 3
-		separatorHeight := 1
-		statusHeight := 1
+		textareaHeight := config.TextareaHeight
+		separatorHeight := config.SeparatorHeight
+		statusHeight := config.StatusHeight
 		vpHeight := m.height - textareaHeight - separatorHeight - statusHeight
 
 		if !m.ready {
@@ -158,20 +266,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case agent.PermissionRequestMsg:
 		m.permission = &PermissionPrompt{
-			ToolName: msg.ToolName,
-			Args:     msg.Args,
-			Cursor:   0,
+			ToolName:   msg.ToolName,
+			Args:       msg.Args,
+			Cursor:     0,
+			WorkingDir: m.agent.WorkingDir(),
 		}
 		m.refreshViewport()
 		return m, nil
 
 	case agent.ToolCallMsg:
-		m.messages = append(m.messages, ChatEntry{
+		entry := ChatEntry{
 			Type:    EntryToolCall,
 			Command: msg.Command,
 			Result:  msg.Result,
 			Denied:  msg.Denied,
-		})
+			Diff:    parseDiffFromToolCall(msg, m.agent.WorkingDir()),
+		}
+		m.messages = append(m.messages, entry)
 		m.saveConversation()
 		m.refreshViewport()
 		return m, nil
@@ -179,7 +290,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agent.ResponseMsg:
 		m.waiting = false
 		m.textarea.Focus()
-		if msg.Err != nil {
+		if msg.Denied {
+			// Permission was denied — no message to show
+		} else if msg.Err != nil {
 			m.messages = append(m.messages, ChatEntry{
 				Type:    EntryError,
 				Content: msg.Err.Error(),

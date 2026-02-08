@@ -7,10 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"go-tui/config"
 	"go-tui/llm"
 )
 
-const maxDefaultLines = 2000
+const maxDefaultLines = config.MaxDefaultLines
 
 type ReadFileArgs struct {
 	FilePath string `json:"file_path"`
@@ -44,14 +45,14 @@ var ReadFileTool = llm.Tool{
 	},
 }
 
-func ExecuteReadFile(argsJSON string, workingDir string) string {
+func ExecuteReadFile(argsJSON string, workingDir string) (string, error) {
 	var args ReadFileArgs
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return fmt.Sprintf("error: invalid arguments: %v", err)
+		return "", NewToolErrorWithDetails(ErrInvalidArguments, "invalid arguments", err.Error())
 	}
 
 	if args.FilePath == "" {
-		return "error: file_path is required"
+		return "", NewToolError(ErrMissingField, "file_path is required")
 	}
 
 	path := args.FilePath
@@ -61,7 +62,7 @@ func ExecuteReadFile(argsJSON string, workingDir string) string {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Sprintf("error: %v", err)
+		return "", NewToolErrorWithDetails(ErrFileNotFound, "file not found", err.Error())
 	}
 
 	lines := strings.Split(string(data), "\n")
@@ -72,7 +73,8 @@ func ExecuteReadFile(argsJSON string, workingDir string) string {
 		offset = 1
 	}
 	if offset > totalLines {
-		return fmt.Sprintf("error: offset %d exceeds file length (%d lines)", offset, totalLines)
+		return "", NewToolErrorWithDetails(ErrInvalidArguments, "offset exceeds file length",
+			fmt.Sprintf("offset %d exceeds %d lines", offset, totalLines))
 	}
 
 	limit := args.Limit
@@ -92,5 +94,5 @@ func ExecuteReadFile(argsJSON string, workingDir string) string {
 		sb.WriteString(fmt.Sprintf("%4d: %s\n", i+1, lines[i]))
 	}
 
-	return sb.String()
+	return sb.String(), nil
 }

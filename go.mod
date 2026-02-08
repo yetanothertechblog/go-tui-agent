@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/gofrs/uuid/v5 v5.3.2
 	github.com/joho/godotenv v1.5.1
+	github.com/sergi/go-diff v1.3.1
 )
 
 require github.com/atotto/clipboard v0.1.4 // indirect

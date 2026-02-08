@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
+	"go-tui/config"
 )
 
 var (
@@ -16,13 +17,6 @@ var (
 			Foreground(lipgloss.Color("205")).
 			Bold(true)
 
-	permToolStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("39")).
-			Bold(true)
-
-	permArgsStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("243"))
-
 	permOptionStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252"))
 
@@ -32,15 +26,29 @@ var (
 )
 
 type PermissionPrompt struct {
-	ToolName string
-	Args     string
-	Cursor   int
+	ToolName   string
+	Args       string
+	Cursor     int
+	WorkingDir string
 }
 
 func (p PermissionPrompt) View(width int) string {
+	boxWidth := width - config.BoxPadding
+	if boxWidth < config.MinBoxWidth {
+		boxWidth = config.MinBoxWidth
+	}
+
+	// Render the tool call preview box (diff for edit/write, formatted command for others)
+	var toolSection string
+	if diff := getDiffForPermission(p.ToolName, p.Args, p.WorkingDir); diff != "" {
+		toolSection = toolBoxStyle.Width(boxWidth).Render(diff)
+	} else {
+		command := p.ToolName + ": " + p.Args
+		header := formatCommand(command)
+		toolSection = toolBoxStyle.Width(boxWidth).Render(toolCmdStyle.Render(header))
+	}
+
 	title := permTitleStyle.Render("Tool Permission Required")
-	tool := permToolStyle.Render(p.ToolName)
-	args := permArgsStyle.Render(p.Args)
 
 	options := []string{
 		"Allow",
@@ -59,12 +67,8 @@ func (p PermissionPrompt) View(width int) string {
 		optionsView += cursor + style.Render(opt) + "\n"
 	}
 
-	content := fmt.Sprintf("%s\n\n%s %s\n\n%s", title, tool, args, optionsView)
+	content := fmt.Sprintf("%s\n\n%s", title, optionsView)
+	permBox := permBoxStyle.Width(boxWidth).Render(content)
 
-	boxWidth := width - 6
-	if boxWidth < 30 {
-		boxWidth = 30
-	}
-
-	return permBoxStyle.Width(boxWidth).Render(content)
+	return toolSection + "\n" + permBox
 }

@@ -34,14 +34,14 @@ var BashTool = llm.Tool{
 	},
 }
 
-func ExecuteBash(argsJSON string, workingDir string) string {
+func ExecuteBash(argsJSON string, workingDir string) (string, error) {
 	var args BashArgs
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return fmt.Sprintf("error: invalid arguments: %v", err)
+		return "", NewToolErrorWithDetails(ErrInvalidArguments, "invalid arguments", err.Error())
 	}
 
 	if args.Command == "" {
-		return "error: command is required"
+		return "", NewToolError(ErrMissingField, "command is required")
 	}
 
 	cmd := exec.Command("bash", "-c", args.Command)
@@ -74,9 +74,9 @@ func ExecuteBash(argsJSON string, workingDir string) string {
 		if output == "" {
 			output = "(no output)"
 		}
-		return output
+		return output, nil
 	case <-time.After(bashTimeout):
 		cmd.Process.Kill()
-		return "error: command timed out after 30s"
+		return "", fmt.Errorf("command timed out after 30s")
 	}
 }

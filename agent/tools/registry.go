@@ -1,6 +1,10 @@
 package tools
 
-import "go-tui/llm"
+import (
+	"fmt"
+
+	"go-tui/llm"
+)
 
 var All = []llm.Tool{
 	ReadFileTool,
@@ -8,9 +12,10 @@ var All = []llm.Tool{
 	EditFileTool,
 	WriteFileTool,
 	BashTool,
+	SearchTool,
 }
 
-func Execute(name string, argsJSON string, workingDir string) string {
+func Execute(name string, argsJSON string, workingDir string) (string, error) {
 	switch name {
 	case "read_file":
 		return ExecuteReadFile(argsJSON, workingDir)
@@ -22,7 +27,9 @@ func Execute(name string, argsJSON string, workingDir string) string {
 		return ExecuteWriteFile(argsJSON, workingDir)
 	case "bash":
 		return ExecuteBash(argsJSON, workingDir)
+	case "search":
+		return ExecuteSearch(argsJSON, workingDir)
 	default:
-		return "error: unknown tool: " + name
+		return "", fmt.Errorf("unknown tool: %s", name)
 	}
 }

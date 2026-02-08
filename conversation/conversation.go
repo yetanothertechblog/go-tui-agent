@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/gofrs/uuid/v5"
+	"go-tui/config"
 )
 
 type Data struct {
@@ -38,7 +39,7 @@ func Load(path string) (*Data, error) {
 }
 
 func (d *Data) Save(dir string) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, config.DirPermissions); err != nil {
 		return fmt.Errorf("creating conversation dir: %w", err)
 	}
 	b, err := json.MarshalIndent(d, "", "  ")
@@ -46,7 +47,7 @@ func (d *Data) Save(dir string) error {
 		return fmt.Errorf("marshaling conversation: %w", err)
 	}
 	path := filepath.Join(dir, d.ID+".json")
-	return os.WriteFile(path, b, 0o644)
+	return os.WriteFile(path, b, config.FilePermissions)
 }
 
 func LatestInDir(dir string) (string, error) {

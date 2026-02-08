@@ -36,7 +36,21 @@ func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int) str
 	}
 
 	var sb strings.Builder
-	for i, entry := range messages {
+	i := 0
+	for i < len(messages) {
+		entry := messages[i]
+		
+		// Check if we can group this and next entries
+		if entry.Type == EntryToolCall && canGroupToolCall(entry) && i+2 < len(messages) {
+			groupEnd := findGroupEnd(messages, i)
+			if groupEnd > i {
+				sb.WriteString(renderGroupedToolCalls(messages[i:groupEnd+1], boxWidth))
+				i = groupEnd + 1
+				continue
+			}
+		}
+		
+		// Render individual entry
 		switch entry.Type {
 		case EntryToolCall:
 			sb.WriteString(renderToolCallEntry(entry, boxWidth))
@@ -55,7 +69,8 @@ func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int) str
 			sb.WriteString(errorStyle.Render("Error: " + entry.Content))
 		}
 
-		if i < len(messages)-1 {
+		i++
+		if i < len(messages) {
 			sb.WriteString("\n\n")
 		}
 	}
@@ -84,8 +99,15 @@ func renderToolCallEntry(entry ChatEntry, boxWidth int) string {
 		return toolCmdStyle.Render(formatCommand(entry.Command)) + " " + deniedStyle.Render("User declined")
 	}
 
-	// Default: show formatted command + result
 	header := formatCommand(entry.Command)
+	name, _ := splitCommand(entry.Command)
+
+	// For read_file, just show the header without content
+	if name == "read_file" {
+		return toolBoxStyle.Width(boxWidth).Render(toolCmdStyle.Render(header))
+	}
+
+	// Default: show formatted command + result
 	result := entry.Result
 	maxResultLines := config.MaxResultLines
 	lines := strings.Split(result, "\n")
@@ -156,11 +178,11 @@ func formatCommand(command string) string {
 		offset, hasOffset := num("offset")
 		limit, hasLimit := num("limit")
 		if hasOffset && hasLimit {
-			s += fmt.Sprintf(" %d:%d", offset, offset+limit)
+			s += fmt.Sprintf(" %d:%d", offset, offset+limit-1)
 		} else if hasOffset {
-			s += fmt.Sprintf(" %d:", offset)
+			s += fmt.Sprintf(" from %d", offset)
 		} else if hasLimit {
-			s += fmt.Sprintf(" :%d", limit)
+			s += fmt.Sprintf(" first %d lines", limit)
 		}
 		return icon + s
 	case "list_files":

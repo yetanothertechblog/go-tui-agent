@@ -2,10 +2,10 @@ package tools
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 
+	"go-tui/config"
 	"go-tui/llm"
 )
 
@@ -36,14 +36,21 @@ var WriteFileTool = llm.Tool{
 	},
 }
 
-func ExecuteWriteFile(argsJSON string, workingDir string) string {
+type WriteFileResult struct {
+	FilePath   string `json:"file_path"`
+	OldContent string `json:"old_content"`
+	NewContent string `json:"new_content"`
+	IsNewFile  bool   `json:"is_new_file"`
+}
+
+func ExecuteWriteFile(argsJSON string, workingDir string) (string, error) {
 	var args WriteFileArgs
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return fmt.Sprintf("error: invalid arguments: %v", err)
+		return "", NewToolErrorWithDetails(ErrInvalidArguments, "invalid arguments", err.Error())
 	}
 
 	if args.FilePath == "" {
-		return "error: file_path is required"
+		return "", NewToolError(ErrMissingField, "file_path is required")
 	}
 
 	path := args.FilePath
@@ -51,14 +58,32 @@ func ExecuteWriteFile(argsJSON string, workingDir string) string {
 		path = filepath.Join(workingDir, path)
 	}
 
+	// Read existing content before overwriting
+	oldContent := ""
+	isNewFile := true
+	if existing, err := os.ReadFile(path); err == nil {
+		oldContent = string(existing)
+		isNewFile = false
+	}
+
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Sprintf("error: %v", err)
+	if err := os.MkdirAll(dir, config.DirPermissions); err != nil {
+		return "", NewToolErrorWithDetails(ErrFileWrite, "failed to create directory", err.Error())
 	}
 
-	if err := os.WriteFile(path, []byte(args.Content), 0o644); err != nil {
-		return fmt.Sprintf("error: %v", err)
+	if err := os.WriteFile(path, []byte(args.Content), config.FilePermissions); err != nil {
+		return "", NewToolErrorWithDetails(ErrFileWrite, "failed to write file", err.Error())
 	}
 
-	return fmt.Sprintf("OK: wrote %s", args.FilePath)
+	result := WriteFileResult{
+		FilePath:   args.FilePath,
+		OldContent: oldContent,
+		NewContent: args.Content,
+		IsNewFile:  isNewFile,
+	}
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return "", NewToolErrorWithDetails(ErrJSONMarshal, "failed to marshal result", err.Error())
+	}
+	return string(resultJSON), nil
 }
