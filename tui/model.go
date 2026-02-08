@@ -44,18 +44,19 @@ type ChatEntry struct {
 }
 
 type Model struct {
-	viewport   viewport.Model
-	textarea   textarea.Model
-	spinner    spinner.Model
-	messages   []ChatEntry
-	agent      *agent.Agent
-	waiting    bool
-	width      int
-	height     int
-	ready      bool
-	permission *PermissionPrompt
-	conv       *conversation.Data
-	convDir    string
+	viewport       viewport.Model
+	textarea       textarea.Model
+	spinner        spinner.Model
+	messages       []ChatEntry
+	agent          *agent.Agent
+	waiting        bool
+	width          int
+	height         int
+	ready          bool
+	permission     *PermissionPrompt
+	conv           *conversation.Data
+	convDir        string
+	markdownRenderer *MarkdownRenderer
 }
 
 var separatorStyle = lipgloss.NewStyle().
@@ -76,6 +77,13 @@ func New(workingDir string, conv *conversation.Data) Model {
 	s.Spinner = spinner.Points
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("63"))
 
+	// Initialize markdown renderer
+	markdownRenderer, err := NewMarkdownRenderer()
+	if err != nil {
+		log.Printf("failed to initialize markdown renderer: %v", err)
+		markdownRenderer = nil
+	}
+
 	var messages []ChatEntry
 	if err := json.Unmarshal(conv.UIMessages, &messages); err != nil {
 		log.Printf("failed to unmarshal UI messages: %v", err)
@@ -92,12 +100,13 @@ func New(workingDir string, conv *conversation.Data) Model {
 	}
 
 	return Model{
-		textarea: ta,
-		spinner:  s,
-		messages: messages,
-		agent:    a,
-		conv:     conv,
-		convDir:  conversation.Dir(workingDir),
+		textarea:        ta,
+		spinner:         s,
+		messages:        messages,
+		agent:           a,
+		conv:            conv,
+		convDir:         conversation.Dir(workingDir),
+		markdownRenderer: markdownRenderer,
 	}
 }
 
@@ -229,7 +238,7 @@ func (m *Model) Init() tea.Cmd {
 }
 
 func (m *Model) refreshViewport() {
-	m.viewport.SetContent(renderMessages(m.messages, m.permission, m.width))
+	m.viewport.SetContent(renderMessages(m.messages, m.permission, m.width, m.markdownRenderer))
 	m.viewport.GotoBottom()
 }
 
@@ -237,6 +246,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -253,10 +263,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.viewport.Width = m.width
 			m.viewport.Height = vpHeight
+			m.textarea.SetWidth(m.width)
+			m.refreshViewport()
 		}
 
-		m.textarea.SetWidth(m.width)
 		return m, nil
+
+	
 
 	case tea.MouseMsg:
 		var cmd tea.Cmd

@@ -25,7 +25,7 @@ var (
 			Bold(true)
 )
 
-func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int) string {
+func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md *MarkdownRenderer) string {
 	if len(messages) == 0 && perm == nil {
 		return "Welcome! Type a message and press Enter to send."
 	}
@@ -60,7 +60,15 @@ func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int) str
 			case "user":
 				sb.WriteString(userMessageStyle.Render(entry.Content))
 			case "assistant":
-				sb.WriteString(entry.Content)
+				if md != nil && isMarkdown(entry.Content) {
+					if rendered, err := md.Render(entry.Content); err == nil {
+						sb.WriteString(rendered)
+					} else {
+						sb.WriteString(entry.Content)
+					}
+				} else {
+					sb.WriteString(entry.Content)
+				}
 			default:
 				sb.WriteString(fmt.Sprintf("%s: %s", entry.Role, entry.Content))
 			}
@@ -168,6 +176,8 @@ func formatCommand(command string) string {
 		icon = config.EditIcon
 	case "write_file":
 		icon = config.WriteIcon
+	case "beads":
+		icon = config.ToolIcon
 	default:
 		icon = config.ToolIcon
 	}
@@ -197,6 +207,12 @@ func formatCommand(command string) string {
 		s := "Search: " + str("pattern")
 		if p := str("path"); p != "" {
 			s += " in " + p
+		}
+		return icon + s
+	case "beads":
+		s := "Beads: " + str("command")
+		if a := str("args"); a != "" {
+			s += " " + a
 		}
 		return icon + s
 	default:

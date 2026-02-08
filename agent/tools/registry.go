@@ -13,6 +13,7 @@ var All = []llm.Tool{
 	WriteFileTool,
 	BashTool,
 	SearchTool,
+	BeadsTool,
 }
 
 func Execute(name string, argsJSON string, workingDir string) (string, error) {
@@ -29,6 +30,8 @@ func Execute(name string, argsJSON string, workingDir string) (string, error) {
 		return ExecuteBash(argsJSON, workingDir)
 	case "search":
 		return ExecuteSearch(argsJSON, workingDir)
+	case "beads":
+		return ExecuteBeads(argsJSON, workingDir)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}

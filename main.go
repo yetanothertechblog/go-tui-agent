@@ -16,7 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func main(
+func main() {
 	resume := flag.Bool("resume", false, "resume a conversation (pass UUID as positional arg for specific conversation)")
 	flag.Parse()
 
