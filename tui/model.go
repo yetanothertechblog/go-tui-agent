@@ -105,6 +105,10 @@ func (m *Model) SetProgram(p *tea.Program) {
 	m.agent.SetProgram(p)
 }
 
+func (m *Model) Shutdown() {
+	m.agent.Shutdown()
+}
+
 func (m *Model) saveConversation() {
 	uiJSON, err := json.Marshal(m.messages)
 	if err != nil {

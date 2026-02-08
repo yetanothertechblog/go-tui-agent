@@ -1,7 +1,5 @@
 package main
 
-
-
 import (
 	"flag"
 	"fmt"
@@ -10,14 +8,15 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"go-tui/config"
 	"go-tui/conversation"
 	"go-tui/llm"
 	"go-tui/tui"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
-func main() {
+func main(
 	resume := flag.Bool("resume", false, "resume a conversation (pass UUID as positional arg for specific conversation)")
 	flag.Parse()
 
@@ -92,4 +91,5 @@ func main() {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
+	m.Shutdown()
 }

@@ -7,6 +7,7 @@ import (
 
 	"go-tui/config"
 	"go-tui/llm"
+	"go-tui/lsp"
 )
 
 type WriteFileArgs struct {
@@ -18,7 +19,7 @@ var WriteFileTool = llm.Tool{
 	Type: "function",
 	Function: llm.ToolFunction{
 		Name:        "write_file",
-		Description: "Create or overwrite a file with the given content. Parent directories are created automatically.",
+		Description: "Create or overwrite a file with the given content. Parent directories are created automatically. NOTE: The system runs LSP diagnostics on the new content and provides feedback in the result. If LSP feedback indicates errors, you should fix them in subsequent tool calls.",
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -37,10 +38,11 @@ var WriteFileTool = llm.Tool{
 }
 
 type WriteFileResult struct {
-	FilePath   string `json:"file_path"`
-	OldContent string `json:"old_content"`
-	NewContent string `json:"new_content"`
-	IsNewFile  bool   `json:"is_new_file"`
+	FilePath    string `json:"file_path"`
+	OldContent  string `json:"old_content"`
+	NewContent  string `json:"new_content"`
+	IsNewFile   bool   `json:"is_new_file"`
+	LSPFeedback string `json:"lsp_feedback,omitempty"`
 }
 
 func ExecuteWriteFile(argsJSON string, workingDir string) (string, error) {
@@ -81,9 +83,19 @@ func ExecuteWriteFile(argsJSON string, workingDir string) (string, error) {
 		NewContent: args.Content,
 		IsNewFile:  isNewFile,
 	}
+
+	if lsp.DefaultManager != nil {
+		if diags, diagErr := lsp.DefaultManager.CheckFile(path, args.Content); diagErr == nil {
+			if feedback := lsp.FormatDiagnostics(path, diags); feedback != "" {
+				result.LSPFeedback = "LSP Feedback: " + feedback
+			}
+		}
+	}
+
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
 		return "", NewToolErrorWithDetails(ErrJSONMarshal, "failed to marshal result", err.Error())
 	}
+	
 	return string(resultJSON), nil
 }

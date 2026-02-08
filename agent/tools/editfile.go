@@ -9,6 +9,7 @@ import (
 
 	"go-tui/config"
 	"go-tui/llm"
+	"go-tui/lsp"
 )
 
 type EditFileArgs struct {
@@ -18,16 +19,17 @@ type EditFileArgs struct {
 }
 
 type EditFileResult struct {
-	FilePath  string `json:"file_path"`
-	OldString string `json:"old_string"`
-	NewString string `json:"new_string"`
+	FilePath    string `json:"file_path"`
+	OldString   string `json:"old_string"`
+	NewString   string `json:"new_string"`
+	LSPFeedback string `json:"lsp_feedback,omitempty"`
 }
 
 var EditFileTool = llm.Tool{
 	Type: "function",
 	Function: llm.ToolFunction{
 		Name:        "edit_file",
-		Description: "Edit a file by replacing an exact string match. The old_string must be unique in the file. Read the file first to get the exact text.",
+		Description: "Edit a file by replacing an exact string match. The old_string must be unique in the file. Read the file first to get the exact text. NOTE: After editing, the system runs LSP diagnostics and provides feedback in the result. If LSP feedback indicates errors, you should fix them in subsequent tool calls.",
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -97,9 +99,19 @@ func ExecuteEditFile(argsJSON string, workingDir string) (string, error) {
 		OldString: args.OldString,
 		NewString: args.NewString,
 	}
+
+	if lsp.DefaultManager != nil {
+		if diags, err := lsp.DefaultManager.CheckFile(path, newContent); err == nil {
+			if feedback := lsp.FormatDiagnostics(path, diags); feedback != "" {
+				editResult.LSPFeedback = "LSP Feedback: " + feedback
+			}
+		}
+	}
+
 	resultJSON, err := json.Marshal(editResult)
 	if err != nil {
 		return "", NewToolErrorWithDetails(ErrJSONMarshal, "failed to marshal result", err.Error())
 	}
+	
 	return string(resultJSON), nil
 }

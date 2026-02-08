@@ -7,6 +7,7 @@ import (
 	"go-tui/agent/tools"
 	"go-tui/config"
 	"go-tui/llm"
+	"go-tui/lsp"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -36,7 +37,7 @@ const (
 	PermissionDeny
 )
 
-const systemPromptTemplate = `You are an expert coding assistant. You help users write, debug, and improve code.
+const systemPromptTemplate = `You are an expert coding assistant with integrated LSP support. You help users write, debug, and improve code.
 
 Working directory: %s
 
@@ -48,7 +49,9 @@ Rules:
 - Prefer simple, readable solutions over clever ones.
 - If you don't know something, say so. Don't guess.
 - Use the tools available to you when needed.
-- When reading files, use paths relative to the working directory unless an absolute path is given.`
+- When reading files, use paths relative to the working directory unless an absolute path is given.
+- The system automatically runs LSP diagnostics after editing files to catch errors.
+- Consider LSP feedback when making code changes and fix any reported issues.`
 
 const maxToolRounds = config.MaxToolRounds
 
@@ -61,11 +64,16 @@ type Agent struct {
 }
 
 func New(workingDir string) *Agent {
+	lsp.Start(workingDir)
 	return &Agent{
 		workingDir:   workingDir,
 		alwaysAllow:  make(map[string]bool),
 		permissionCh: make(chan PermissionDecision),
 	}
+}
+
+func (a *Agent) Shutdown() {
+	lsp.Stop()
 }
 
 func (a *Agent) SetProgram(p *tea.Program) {
