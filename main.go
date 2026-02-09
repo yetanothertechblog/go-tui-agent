@@ -86,7 +86,6 @@ func main() {
 
 	m := tui.New(workingDir, conv)
 	p := tea.NewProgram(&m, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	m.SetProgram(p)
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)

@@ -31,7 +31,7 @@ func InitAPIKey() error {
 	return nil
 }
 
-func CallLLM(messages []Message, tools []Tool) (*Delta, error) {
+func CallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
 	req := ChatRequest{
 		Model:    modelName,
 		Messages: messages,
@@ -72,10 +72,13 @@ func CallLLM(messages []Message, tools []Tool) (*Delta, error) {
 		return nil, fmt.Errorf("no choices in response")
 	}
 
-	return chatResp.Choices[0].Message, nil
+	return &LLMResult{
+		Delta: chatResp.Choices[0].Message,
+		Usage: chatResp.Usage,
+	}, nil
 }
 
-func CallLLMStream(messages []Message, tools []Tool, onContent func(string)) (*Delta, error) {
+func CallLLMStream(messages []Message, tools []Tool, onContent func(string, bool)) (*LLMResult, error) {
 	req := ChatRequest{
 		Model:    modelName,
 		Messages: messages,
@@ -108,6 +111,7 @@ func CallLLMStream(messages []Message, tools []Tool, onContent func(string)) (*D
 	}
 
 	full := &Delta{}
+	var usage *Usage
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -123,6 +127,11 @@ func CallLLMStream(messages []Message, tools []Tool, onContent func(string)) (*D
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue
 		}
+
+		if chunk.Usage != nil {
+			usage = chunk.Usage
+		}
+
 		if len(chunk.Choices) == 0 {
 			continue
 		}
@@ -132,11 +141,13 @@ func CallLLMStream(messages []Message, tools []Tool, onContent func(string)) (*D
 			continue
 		}
 
+		if delta.ReasoningContent != "" {
+			full.ReasoningContent += delta.ReasoningContent
+			onContent(delta.ReasoningContent, true)
+		}
 		if delta.Content != "" {
 			full.Content += delta.Content
-			if onContent != nil {
-				onContent(delta.Content)
-			}
+			onContent(delta.Content, false)
 		}
 		if len(delta.ToolCalls) > 0 {
 			for _, tc := range delta.ToolCalls {
@@ -150,5 +161,5 @@ func CallLLMStream(messages []Message, tools []Tool, onContent func(string)) (*D
 		}
 	}
 
-	return full, scanner.Err()
+	return &LLMResult{Delta: full, Usage: usage}, scanner.Err()
 }

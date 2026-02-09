@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"go-tui/agent"
+	"go-tui/llm"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -36,13 +36,21 @@ func handleKeyMsg(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 			Content: text,
 		})
 
+		// Append user message to history (now on Model, not Agent)
+		m.history = append(m.history, llm.Message{
+			Role:    "user",
+			Content: text,
+		})
+
 		m.textarea.Reset()
 		m.textarea.Blur()
 		m.waiting = true
+		m.toolRoundCount = 0
+		m.consecutiveErrors = 0
 
 		m.refreshViewport()
 
-		return m, m.agent.Send(text)
+		return m, callLLM(m.agent, m.history)
 	}
 
 	if m.waiting {
@@ -81,19 +89,51 @@ func handlePermissionKey(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEnter:
-		var decision agent.PermissionDecision
-		switch m.permission.Cursor {
-		case 0:
-			decision = agent.PermissionAllow
-		case 1:
-			decision = agent.PermissionAlwaysAllow
-		case 2:
-			decision = agent.PermissionDeny
-		}
+		// Read cursor and tool call before clearing permission state
+		cursor := m.permission.Cursor
+		tc := m.awaitingPermission
+
+		// Clear permission state
 		m.permission = nil
+		m.awaitingPermission = nil
 		m.refreshViewport()
-		go m.agent.RespondPermission(decision)
-		return m, nil
+
+		switch cursor {
+		case 0: // Allow
+			return m, executeTool(m.agent, *tc)
+
+		case 1: // Always Allow
+			m.alwaysAllow[tc.Function.Name] = true
+			return m, executeTool(m.agent, *tc)
+
+		case 2: // Deny
+			command := tc.Function.Name + ": " + tc.Function.Arguments
+			result := "Tool call denied by user."
+
+			// Append denial to history
+			m.history = append(m.history, llm.Message{
+				Role:       "tool",
+				Content:    result,
+				ToolCallID: tc.ID,
+			})
+
+			// Append denied tool call to UI messages
+			m.messages = append(m.messages, ChatEntry{
+				Type:    EntryToolCall,
+				Command: command,
+				Denied:  true,
+				Diff:    parseDiffFromToolCall(tc.Function.Name, tc.Function.Arguments, "", m.workingDir, true),
+			})
+
+			// Stop the loop — return to user input
+			m.pendingToolCalls = nil
+			m.pendingToolIndex = 0
+			m.waiting = false
+			m.textarea.Focus()
+			m.saveConversation()
+			m.refreshViewport()
+			return m, nil
+		}
 	}
 
 	return m, nil

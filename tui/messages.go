@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"go-tui/config"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 var (
@@ -15,7 +16,7 @@ var (
 			Bold(true)
 
 	userMessageStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("240"))
+				Background(lipgloss.Color("240"))
 
 	errorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("196"))
@@ -39,7 +40,7 @@ func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md 
 	i := 0
 	for i < len(messages) {
 		entry := messages[i]
-		
+
 		// Check if we can group this and next entries
 		if entry.Type == EntryToolCall && canGroupToolCall(entry) && i+2 < len(messages) {
 			groupEnd := findGroupEnd(messages, i)
@@ -49,7 +50,7 @@ func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md 
 				continue
 			}
 		}
-		
+
 		// Render individual entry
 		switch entry.Type {
 		case EntryToolCall:
@@ -79,7 +80,7 @@ func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md 
 
 		i++
 		if i < len(messages) {
-			sb.WriteString("\n\n")
+			sb.WriteString("\n")
 		}
 	}
 
@@ -228,4 +229,3 @@ func splitCommand(command string) (string, string) {
 	}
 	return command[:idx], command[idx+2:]
 }
-
