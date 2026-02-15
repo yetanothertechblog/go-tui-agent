@@ -12,8 +12,11 @@ type MarkdownRenderer struct {
 }
 
 // NewMarkdownRenderer creates a new markdown renderer.
-func NewMarkdownRenderer() (*MarkdownRenderer, error) {
-	renderer, err := glamour.NewTermRenderer(glamour.WithStandardStyle("auto"))
+func NewMarkdownRenderer(width int) (*MarkdownRenderer, error) {
+	renderer, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(width),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +32,7 @@ func (r *MarkdownRenderer) Render(markdown string) (string, error) {
 	if err != nil {
 		return markdown, err
 	}
-	return strings.TrimRight(rendered, "\n"), nil
+	return strings.Trim(rendered, "\n"), nil
 }
 
 // isMarkdown returns true if the content likely contains markdown formatting.

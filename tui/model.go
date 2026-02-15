@@ -7,16 +7,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"go-tui/agent"
+	"go-tui/config"
+	"go-tui/conversation"
+	"go-tui/llm"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"go-tui/agent"
-	"go-tui/config"
-	"go-tui/conversation"
-	"go-tui/llm"
 )
 
 type EntryType int
@@ -47,6 +49,15 @@ type ChatEntry struct {
 const maxToolRounds = config.MaxToolRounds
 const maxConsecutiveErrors = 3
 
+// PistonTickMsg drives the piston animation.
+type PistonTickMsg time.Time
+
+func pistonTick() tea.Cmd {
+	return tea.Tick(250*time.Millisecond, func(t time.Time) tea.Msg {
+		return PistonTickMsg(t)
+	})
+}
+
 type Model struct {
 	viewport           viewport.Model
 	textarea           textarea.Model
@@ -68,17 +79,16 @@ type Model struct {
 	consecutiveErrors  int
 	pendingToolCalls   []llm.ToolCall
 	pendingToolIndex   int
-	awaitingPermission  *llm.ToolCall
-	totalTokens         int
-	streamingTokens     int
-	streamingThinking   bool
+	awaitingPermission *llm.ToolCall
+	totalTokens        int
+	streamingTokens    int
+	streamingThinking  bool
+	pistonFrame        int
+	pistonTicks        int
+	dialogueIndex      int
 }
 
-var separatorStyle = lipgloss.NewStyle().
-	Foreground(lipgloss.Color("240"))
-
-var statusStyle = lipgloss.NewStyle().
-	Foreground(lipgloss.Color("243"))
+// separatorStyle and statusStyle are defined in theme.go
 
 func New(workingDir string, conv *conversation.Data) Model {
 	ta := textarea.New()
@@ -90,10 +100,14 @@ func New(workingDir string, conv *conversation.Data) Model {
 
 	s := spinner.New()
 	s.Spinner = spinner.Points
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("63"))
+	s.Style = spinnerStyle
 
-	// Initialize markdown renderer
-	markdownRenderer, err := NewMarkdownRenderer()
+	// Initialize markdown renderer before the TUI event loop starts,
+	// so the terminal color query (from "auto" style) completes before
+	// the textarea captures input.
+	mdStart := time.Now()
+	markdownRenderer, err := NewMarkdownRenderer(0)
+	log.Printf("NewMarkdownRenderer took %s", time.Since(mdStart))
 	if err != nil {
 		log.Printf("failed to initialize markdown renderer: %v", err)
 		markdownRenderer = nil
@@ -244,7 +258,13 @@ func parseDiffFromArgs(name, argsJSON, workingDir string) *DiffData {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(textarea.Blink, spinner.Tick)
+	return tea.Batch(textarea.Blink, spinner.Tick, pistonTick())
+}
+
+func (m *Model) updateMarkdownRenderer() {
+	if r, err := NewMarkdownRenderer(m.width); err == nil {
+		m.markdownRenderer = r
+	}
 }
 
 func (m *Model) refreshViewport() {
@@ -301,16 +321,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-		vpHeight := m.height - config.TextareaHeight - 2*config.SeparatorHeight - config.StatusHeight - config.TokenBarHeight
+		// statusLine(1) + separator(1) + textarea(3) + separator(1) = 6
+		vpHeight := m.height - 6
+		taWidth := m.width
 
 		if !m.ready {
 			m.viewport = viewport.New(m.width, vpHeight)
+			m.textarea.SetWidth(taWidth)
+			m.updateMarkdownRenderer()
 			m.refreshViewport()
 			m.ready = true
 		} else {
 			m.viewport.Width = m.width
 			m.viewport.Height = vpHeight
-			m.textarea.SetWidth(m.width)
+			m.textarea.SetWidth(taWidth)
+			m.updateMarkdownRenderer()
 			m.refreshViewport()
 		}
 
@@ -334,6 +359,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case LLMResponseMsg:
 		m.streamingTokens = 0
 		m.streamingThinking = false
+		log.Printf("LLMResponseMsg: content=%q toolCalls=%d", msg.Content, len(msg.ToolCalls))
 		if msg.Usage != nil {
 			m.totalTokens = msg.Usage.TotalTokens
 		}
@@ -374,8 +400,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ToolCalls: msg.ToolCalls,
 		})
 
-		// If there's content alongside tool calls, show it (fixes dropped-content bug)
-		if msg.Content != "" {
+		// If there's meaningful content alongside tool calls, show it
+		if strings.TrimSpace(msg.Content) != "" {
 			m.messages = append(m.messages, ChatEntry{
 				Type:    EntryMessage,
 				Role:    "assistant",
@@ -386,6 +412,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingToolCalls = msg.ToolCalls
 		m.pendingToolIndex = 0
 		m.toolRoundCount++
+		log.Printf("LLM round %d: %d tool calls, content=%q", m.toolRoundCount, len(msg.ToolCalls), msg.Content)
 		m.refreshViewport()
 
 		cmd := m.dispatchNextTool()
@@ -427,6 +454,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.dispatchNextTool()
 		return m, cmd
 
+	case PistonTickMsg:
+		m.pistonFrame = (m.pistonFrame + 1) % len(pistonFrames)
+		m.pistonTicks++
+		if m.pistonTicks%12 == 0 {
+			m.dialogueIndex = (m.dialogueIndex + 1) % len(robotDialogues)
+		}
+		return m, pistonTick()
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -448,39 +483,58 @@ func (m *Model) View() string {
 		return "Initializing..."
 	}
 
+	statusLine := m.renderStatusLine()
+
 	separator := separatorStyle.Render(strings.Repeat("─", m.width))
 
-	var status string
+	inputArea := m.textarea.View()
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		m.viewport.View(),
+		statusLine,
+		separator,
+		inputArea,
+		separator,
+	)
+}
+
+func (m *Model) renderStatusLine() string {
+	// Left: thinking/streaming indicator
+	var left string
 	if m.waiting {
 		if m.streamingTokens > 0 {
 			thinkingStr := ""
 			if m.streamingThinking {
 				thinkingStr = " · ( thinking )"
 			}
-			status = m.spinner.View() + fmt.Sprintf(" Processing · ⬇ %d%s tokens", m.streamingTokens, thinkingStr)
+			left = m.spinner.View() + fmt.Sprintf(" Processing · ⬇ %d tokens%s", m.streamingTokens, thinkingStr)
 		} else {
-			status = m.spinner.View() + " Processing"
+			left = m.spinner.View() + " Processing"
 		}
-	} else {
-		status = statusStyle.Render("Waiting for your input")
 	}
 
-	tokenLabel := fmt.Sprintf("tokens: %d/%d ", m.totalTokens, config.MaxContextTokens)
-	barWidth := m.width - len(tokenLabel) - 2
-	if barWidth < 10 {
-		barWidth = 10
+	// Right: <token label> <bar>
+	tokenLabel := statusStyle.Render(fmt.Sprintf("%d/%d ", m.totalTokens, config.MaxContextTokens))
+	barMaxWidth := m.width * 40 / 100
+	if barMaxWidth < 1 {
+		barMaxWidth = 1
 	}
-	tokenBar := statusStyle.Render(tokenLabel) + renderBar(m.totalTokens, config.MaxContextTokens, barWidth)
+	displayTokens := m.totalTokens
+	if displayTokens < 1000 {
+		displayTokens = 1000
+	}
+	bar := renderBar(displayTokens, config.MaxContextTokens, barMaxWidth)
+	right := tokenLabel + bar + "  "
 
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		m.viewport.View(),
-		status,
-		separator,
-		m.textarea.View(),
-		separator,
-		tokenBar,
-	)
+	// Layout: <left> <gap> <right>
+	leftWidth := lipgloss.Width(left)
+	rightWidth := lipgloss.Width(right)
+	gap := m.width - leftWidth - rightWidth
+	if gap < 1 {
+		gap = 1
+	}
+	return left + strings.Repeat(" ", gap) + right
 }
 
 func renderBar(value, max, width int) string {
@@ -491,11 +545,5 @@ func renderBar(value, max, width int) string {
 	filled := int(ratio * float64(width))
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
 
-	color := "42"
-	if ratio > 0.8 {
-		color = "196"
-	} else if ratio > 0.5 {
-		color = "214"
-	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(bar)
+	return lipgloss.NewStyle().Foreground(tokenBarColor(ratio)).Render(bar)
 }

@@ -4,34 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"go-tui/config"
+
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
-var (
-	diffAddedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("42"))
-
-	diffRemovedStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("196"))
-
-	diffHeaderStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("63")).
-			Bold(true)
-
-	diffHunkStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("243"))
-
-	diffLineNumStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("240"))
-
-	toolBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("63")).
-			Padding(0, config.DiffBoxPadding).
-			Foreground(lipgloss.Color("243"))
-)
+// Styles are defined in theme.go
 
 // renderDiff renders a unified-style diff with colored +/- lines and line numbers.
 // When OldText is empty, all lines are shown as additions (new file).

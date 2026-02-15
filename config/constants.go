@@ -10,13 +10,9 @@ const (
 
 	// UI Configuration
 	TextareaHeight  = 3  // Height of the input textarea
-	SeparatorHeight = 1  // Height of the separator line
-	StatusHeight    = 1  // Height of the status line
-	TokenBarHeight  = 2  // Height of the token bar
 	MaxResultLines  = 10 // Maximum lines to display for tool results before truncating
 	MinBoxWidth     = 30 // Minimum width for UI boxes
 	BoxPadding      = 4  // Padding for UI boxes (2 sides)
-	DiffBoxPadding  = 2  // Padding for diff boxes (1 side)
 
 	// Tool Icons
 	ToolIcon   = "🔧 "

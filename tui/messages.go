@@ -3,49 +3,37 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"go-tui/config"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
-var (
-	toolCmdStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("63")).
-			Bold(true)
-
-	userMessageStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("240"))
-
-	errorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196"))
-
-	deniedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")).
-			Bold(true)
-)
+// Styles are defined in theme.go
 
 func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md *MarkdownRenderer) string {
 	if len(messages) == 0 && perm == nil {
 		return "Welcome! Type a message and press Enter to send."
 	}
 
-	boxWidth := width - config.BoxPadding
-	if boxWidth < config.MinBoxWidth {
-		boxWidth = config.MinBoxWidth
-	}
-
 	var sb strings.Builder
+	// Debug: log entry types to verify interleaving
+	for idx, e := range messages {
+		log.Printf("messages[%d]: Type=%d Role=%q Command=%q", idx, e.Type, e.Role, e.Command)
+	}
 	i := 0
 	for i < len(messages) {
 		entry := messages[i]
 
+		var rendered string
+
 		// Check if we can group this and next entries
-		if entry.Type == EntryToolCall && canGroupToolCall(entry) && i+2 < len(messages) {
+		if entry.Type == EntryToolCall && canGroupToolCall(entry) && i+1 < len(messages) {
 			groupEnd := findGroupEnd(messages, i)
 			if groupEnd > i {
-				sb.WriteString(renderGroupedToolCalls(messages[i:groupEnd+1], boxWidth))
+				rendered = renderGroupedToolCalls(messages[i : groupEnd+1])
+				rendered = strings.TrimSpace(rendered)
+				sb.WriteString(rendered)
 				i = groupEnd + 1
 				continue
 			}
@@ -54,40 +42,50 @@ func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md 
 		// Render individual entry
 		switch entry.Type {
 		case EntryToolCall:
-			sb.WriteString(renderToolCallEntry(entry, boxWidth))
+			rendered = renderToolCallEntry(entry)
 
 		case EntryMessage:
 			switch entry.Role {
 			case "user":
-				sb.WriteString(userMessageStyle.Render(entry.Content))
+				rendered = userMessageStyle.Render(entry.Content)
 			case "assistant":
 				if md != nil && isMarkdown(entry.Content) {
-					if rendered, err := md.Render(entry.Content); err == nil {
-						sb.WriteString(rendered)
+					if r, err := md.Render(entry.Content); err == nil {
+						rendered = r
 					} else {
-						sb.WriteString(entry.Content)
+						rendered = entry.Content
 					}
 				} else {
-					sb.WriteString(entry.Content)
+					rendered = entry.Content
 				}
 			default:
-				sb.WriteString(fmt.Sprintf("%s: %s", entry.Role, entry.Content))
+				rendered = fmt.Sprintf("%s: %s", entry.Role, entry.Content)
 			}
 
 		case EntryError:
-			sb.WriteString(errorStyle.Render("Error: " + entry.Content))
+			rendered = errorStyle.Render("Error: " + entry.Content)
 		}
 
-		i++
-		if i < len(messages) {
+		rendered = strings.Trim(rendered, "\n")
+
+		// Extra blank line before user/assistant messages to separate conversation turns
+		if entry.Type == EntryMessage && (entry.Role == "user" || entry.Role == "assistant") && sb.Len() > 0 {
 			sb.WriteString("\n")
 		}
+		sb.WriteString(rendered)
+		if entry.Type != EntryToolCall {
+			sb.WriteString("\n")
+		}
+
+		// prevType = entry.Type
+
+		i++
 	}
 
 	// Show permission prompt inline
 	if perm != nil {
 		if len(messages) > 0 {
-			sb.WriteString("\n\n")
+			sb.WriteString("\n")
 		}
 		sb.WriteString(perm.View(width))
 	}
@@ -95,36 +93,49 @@ func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md 
 	return sb.String()
 }
 
-func renderToolCallEntry(entry ChatEntry, boxWidth int) string {
-	if entry.Diff != nil {
-		rendered := toolBoxStyle.Width(boxWidth).Render(renderDiff(*entry.Diff))
-		if entry.Denied {
-			return rendered + "\n" + deniedStyle.Render("denied")
-		}
-		return rendered
-	}
+func renderToolCallEntry(entry ChatEntry) string {
+	header := formatCommand(entry.Command)
+	bullet := toolBulletStyle.Render("⏺ ") + toolCmdStyle.Render(header)
 
 	if entry.Denied {
-		return toolCmdStyle.Render(formatCommand(entry.Command)) + " " + deniedStyle.Render("User declined")
+		return bullet + " " + deniedStyle.Render("User declined")
 	}
 
-	header := formatCommand(entry.Command)
+	if entry.Diff != nil {
+		return bullet + "\n" + indentBlock(renderDiff(*entry.Diff))
+	}
+
 	name, _ := splitCommand(entry.Command)
 
-	// For read_file, just show the header without content
+	// For read_file, just show the bullet header
 	if name == "read_file" {
-		return toolBoxStyle.Width(boxWidth).Render(toolCmdStyle.Render(header))
+		return bullet
 	}
 
-	// Default: show formatted command + result
+	// Default: show bullet + indented result
 	result := entry.Result
 	maxResultLines := config.MaxResultLines
 	lines := strings.Split(result, "\n")
 	if len(lines) > maxResultLines {
 		result = strings.Join(lines[:maxResultLines], "\n") + fmt.Sprintf("\n... (%d more lines)", len(lines)-maxResultLines)
 	}
-	content := toolCmdStyle.Render(header) + "\n" + result
-	return toolBoxStyle.Width(boxWidth).Render(content)
+	return bullet + "\n" + indentBlock(result)
+}
+
+// indentBlock renders content with ⎿ on the first line, then spaces for the rest.
+func indentBlock(content string) string {
+	content = strings.TrimRight(content, "\n ")
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+	bar := toolIndentStyle.Render("⎿ ")
+	pad := "  "
+	out := bar + lines[0]
+	for _, line := range lines[1:] {
+		out += "\n" + pad + line
+	}
+	return out
 }
 
 // formatCommand turns "tool_name: {json}" into a human-readable string.

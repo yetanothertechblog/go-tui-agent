@@ -3,27 +3,10 @@ package tui
 import (
 	"fmt"
 
-	"github.com/charmbracelet/lipgloss"
 	"go-tui/config"
 )
 
-var (
-	permBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("205")).
-			Padding(1, 2)
-
-	permTitleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("205")).
-			Bold(true)
-
-	permOptionStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252"))
-
-	permSelectedStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("205")).
-				Bold(true)
-)
+// Styles are defined in theme.go
 
 type PermissionPrompt struct {
 	ToolName   string
@@ -38,14 +21,15 @@ func (p PermissionPrompt) View(width int) string {
 		boxWidth = config.MinBoxWidth
 	}
 
-	// Render the tool call preview box (diff for edit/write, formatted command for others)
+	// Render the tool call preview with bullet/indent style
+	command := p.ToolName + ": " + p.Args
+	header := formatCommand(command)
+	bullet := toolBulletStyle.Render("⏺ ") + toolCmdStyle.Render(header)
 	var toolSection string
 	if diff := getDiffForPermission(p.ToolName, p.Args, p.WorkingDir); diff != "" {
-		toolSection = toolBoxStyle.Width(boxWidth).Render(diff)
+		toolSection = bullet + "\n" + indentBlock(diff)
 	} else {
-		command := p.ToolName + ": " + p.Args
-		header := formatCommand(command)
-		toolSection = toolBoxStyle.Width(boxWidth).Render(toolCmdStyle.Render(header))
+		toolSection = bullet
 	}
 
 	title := permTitleStyle.Render("Tool Permission Required")
