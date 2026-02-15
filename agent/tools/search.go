@@ -7,8 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"go-tui/llm"
 )
 
 type SearchArgs struct {
@@ -16,12 +14,11 @@ type SearchArgs struct {
 	Path    string `json:"path"`
 }
 
-var SearchTool = llm.Tool{
-	Type: "function",
-	Function: llm.ToolFunction{
-		Name:        "search",
-		Description: "Search for a string pattern in files using grep. Returns matching lines with file paths and line numbers.",
-		Parameters: json.RawMessage(`{
+func init() {
+	Register(Typed[SearchArgs]{
+		ToolName:        "search",
+		ToolDescription: "Search for a string pattern in files using grep. Returns matching lines with file paths and line numbers.",
+		ToolSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"pattern": {
@@ -35,17 +32,13 @@ var SearchTool = llm.Tool{
 			},
 			"required": ["pattern"]
 		}`),
-	},
+		Run: executeSearch,
+	})
 }
 
-func ExecuteSearch(argsJSON string, workingDir string) (string, error) {
-	var args SearchArgs
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", NewToolErrorWithDetails(ErrInvalidArguments, "invalid arguments", err.Error())
-	}
-
+func executeSearch(args SearchArgs, workingDir string) (ToolResult, error) {
 	if args.Pattern == "" {
-		return "", NewToolError(ErrMissingField, "pattern is required")
+		return ToolResult{}, NewToolError(ErrMissingField, "pattern is required")
 	}
 
 	searchPath := args.Path
@@ -56,7 +49,7 @@ func ExecuteSearch(argsJSON string, workingDir string) (string, error) {
 	}
 
 	if _, err := os.Stat(searchPath); os.IsNotExist(err) {
-		return "", NewToolErrorWithDetails(ErrFileNotFound, "path does not exist", args.Path)
+		return ToolResult{}, NewToolErrorWithDetails(ErrFileNotFound, "path does not exist", args.Path)
 	}
 
 	cmd := exec.Command("grep",
@@ -96,15 +89,14 @@ func ExecuteSearch(argsJSON string, workingDir string) (string, error) {
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			if exitErr.ExitCode() == 1 {
-				return "No matches found.", nil
+				return ToolResult{Output: "No matches found."}, nil
 			}
 		}
-		return "", fmt.Errorf("grep failed: %v", err)
+		return ToolResult{}, fmt.Errorf("grep failed: %v", err)
 	}
 
 	lines := strings.Split(strings.TrimRight(string(output), "\n"), "\n")
 
-	// Make paths relative and truncate long lines
 	for i, line := range lines {
 		if rel, err := filepath.Rel(workingDir, line); err == nil {
 			lines[i] = rel
@@ -122,5 +114,5 @@ func ExecuteSearch(argsJSON string, workingDir string) (string, error) {
 		lines = append(lines, fmt.Sprintf("... (%d total matches, showing first 30)", total))
 	}
 
-	return strings.Join(lines, "\n"), nil
+	return ToolResult{Output: strings.Join(lines, "\n")}, nil
 }

@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"go-tui/llm"
 )
 
 type ListFilesArgs struct {
@@ -15,12 +13,11 @@ type ListFilesArgs struct {
 	Recursive bool   `json:"recursive,omitempty"`
 }
 
-var ListFilesTool = llm.Tool{
-	Type: "function",
-	Function: llm.ToolFunction{
-		Name:        "list_files",
-		Description: "List files and directories at the given path. Directories have a trailing '/'. Skips .git.",
-		Parameters: json.RawMessage(`{
+func init() {
+	Register(Typed[ListFilesArgs]{
+		ToolName:        "list_files",
+		ToolDescription: "List files and directories at the given path. Directories have a trailing '/'. Skips .git.",
+		ToolSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"path": {
@@ -33,15 +30,11 @@ var ListFilesTool = llm.Tool{
 				}
 			}
 		}`),
-	},
+		Run: executeListFiles,
+	})
 }
 
-func ExecuteListFiles(argsJSON string, workingDir string) (string, error) {
-	var args ListFilesArgs
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", NewToolErrorWithDetails(ErrInvalidArguments, "invalid arguments", err.Error())
-	}
-
+func executeListFiles(args ListFilesArgs, workingDir string) (ToolResult, error) {
 	path := args.Path
 	if path == "" {
 		path = workingDir
@@ -51,10 +44,10 @@ func ExecuteListFiles(argsJSON string, workingDir string) (string, error) {
 
 	info, err := os.Stat(path)
 	if err != nil {
-		return "", NewToolErrorWithDetails(ErrFileNotFound, "path not found", err.Error())
+		return ToolResult{}, NewToolErrorWithDetails(ErrFileNotFound, "path not found", err.Error())
 	}
 	if !info.IsDir() {
-		return "", NewToolError(ErrInvalidArguments, fmt.Sprintf("%s is not a directory", args.Path))
+		return ToolResult{}, NewToolError(ErrInvalidArguments, fmt.Sprintf("%s is not a directory", args.Path))
 	}
 
 	var sb strings.Builder
@@ -78,7 +71,7 @@ func ExecuteListFiles(argsJSON string, workingDir string) (string, error) {
 	} else {
 		entries, err := os.ReadDir(path)
 		if err != nil {
-			return "", NewToolErrorWithDetails(ErrFileNotFound, "failed to read directory", err.Error())
+			return ToolResult{}, NewToolErrorWithDetails(ErrFileNotFound, "failed to read directory", err.Error())
 		}
 		for _, entry := range entries {
 			if entry.Name() == ".git" {
@@ -92,5 +85,5 @@ func ExecuteListFiles(argsJSON string, workingDir string) (string, error) {
 		}
 	}
 
-	return sb.String(), nil
+	return ToolResult{Output: sb.String()}, nil
 }

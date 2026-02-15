@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os/exec"
 	"time"
-
-	"go-tui/llm"
 )
 
 const bashTimeout = 30 * time.Second
@@ -16,12 +14,11 @@ type BashArgs struct {
 	Command string `json:"command"`
 }
 
-var BashTool = llm.Tool{
-	Type: "function",
-	Function: llm.ToolFunction{
-		Name:        "bash",
-		Description: "Execute a bash command and return the output. Use this to run shell commands, read files, list directories, search code, etc.",
-		Parameters: json.RawMessage(`{
+func init() {
+	Register(Typed[BashArgs]{
+		ToolName:        "bash",
+		ToolDescription: "Execute a bash command and return the output. Use this to run shell commands, read files, list directories, search code, etc.",
+		ToolSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"command": {
@@ -31,17 +28,13 @@ var BashTool = llm.Tool{
 			},
 			"required": ["command"]
 		}`),
-	},
+		Run: executeBash,
+	})
 }
 
-func ExecuteBash(argsJSON string, workingDir string) (string, error) {
-	var args BashArgs
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", NewToolErrorWithDetails(ErrInvalidArguments, "invalid arguments", err.Error())
-	}
-
+func executeBash(args BashArgs, workingDir string) (ToolResult, error) {
 	if args.Command == "" {
-		return "", NewToolError(ErrMissingField, "command is required")
+		return ToolResult{}, NewToolError(ErrMissingField, "command is required")
 	}
 
 	cmd := exec.Command("bash", "-c", args.Command)
@@ -74,9 +67,9 @@ func ExecuteBash(argsJSON string, workingDir string) (string, error) {
 		if output == "" {
 			output = "(no output)"
 		}
-		return output, nil
+		return ToolResult{Output: output}, nil
 	case <-time.After(bashTimeout):
 		cmd.Process.Kill()
-		return "", fmt.Errorf("command timed out after 30s")
+		return ToolResult{}, fmt.Errorf("command timed out after 30s")
 	}
 }

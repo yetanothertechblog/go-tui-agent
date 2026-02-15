@@ -82,7 +82,7 @@ func callLLM(a *agent.Agent, history []llm.Message) tea.Cmd {
 			}
 		}
 
-		result, err := llm.CallLLMStream(messages, tools.All, onContent)
+		result, err := llm.CallLLMStream(messages, tools.All(), onContent)
 		if err != nil {
 			log.Printf("llm error: %v", err)
 			ch <- LLMResponseMsg{Err: err}
@@ -143,12 +143,12 @@ func executeTool(a *agent.Agent, tc llm.ToolCall) tea.Cmd {
 				Err:        err,
 			}
 		}
-		log.Printf("tool result: %.200s", result)
+		log.Printf("tool result: %.200s", result.Output)
 		return ToolResultMsg{
 			ToolCallID: id,
 			ToolName:   name,
 			Args:       args,
-			Result:     result,
+			Result:     result.Output,
 		}
 	}
 }

@@ -6,33 +6,30 @@ import (
 	"go-tui/llm"
 )
 
-var All = []llm.Tool{
-	ReadFileTool,
-	ListFilesTool,
-	EditFileTool,
-	WriteFileTool,
-	BashTool,
-	SearchTool,
-	BeadsTool,
+var registry = map[string]ToolImpl{}
+var registryOrder []string
+
+func Register(t ToolImpl) {
+	name := t.Name()
+	if _, exists := registry[name]; exists {
+		panic(fmt.Sprintf("duplicate tool registration: %s", name))
+	}
+	registry[name] = t
+	registryOrder = append(registryOrder, name)
 }
 
-func Execute(name string, argsJSON string, workingDir string) (string, error) {
-	switch name {
-	case "read_file":
-		return ExecuteReadFile(argsJSON, workingDir)
-	case "list_files":
-		return ExecuteListFiles(argsJSON, workingDir)
-	case "edit_file":
-		return ExecuteEditFile(argsJSON, workingDir)
-	case "write_file":
-		return ExecuteWriteFile(argsJSON, workingDir)
-	case "bash":
-		return ExecuteBash(argsJSON, workingDir)
-	case "search":
-		return ExecuteSearch(argsJSON, workingDir)
-	case "beads":
-		return ExecuteBeads(argsJSON, workingDir)
-	default:
-		return "", fmt.Errorf("unknown tool: %s", name)
+func All() []llm.Tool {
+	out := make([]llm.Tool, 0, len(registryOrder))
+	for _, name := range registryOrder {
+		out = append(out, ToLLMTool(registry[name]))
 	}
+	return out
+}
+
+func Execute(name string, argsJSON string, workingDir string) (ToolResult, error) {
+	t, ok := registry[name]
+	if !ok {
+		return ToolResult{}, fmt.Errorf("unknown tool: %s", name)
+	}
+	return t.Execute(argsJSON, workingDir)
 }
