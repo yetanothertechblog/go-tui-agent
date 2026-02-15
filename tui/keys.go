@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"go-tui/llm"
+	"go-tui/tui/slashcmd"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -19,6 +20,16 @@ func handleKeyMsg(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 		return handlePermissionKey(m, msg)
 	}
 
+	// Rewind overlay mode
+	if m.rewindOverlay != nil {
+		return handleRewindOverlayKey(m, msg)
+	}
+
+	// Slash overlay mode
+	if m.slashOverlay != nil {
+		return handleSlashOverlayKey(m, msg)
+	}
+
 	switch msg.Type {
 	case tea.KeyEnter:
 		if m.waiting {
@@ -28,6 +39,11 @@ func handleKeyMsg(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 		text := strings.TrimSpace(m.textarea.Value())
 		if text == "" {
 			return m, nil
+		}
+
+		if handled, cmd := m.executeSlashCommand(text); handled {
+			m.textarea.Reset()
+			return m, cmd
 		}
 
 		m.messages = append(m.messages, ChatEntry{
@@ -69,7 +85,114 @@ func handleKeyMsg(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
+
+	// Check if textarea now starts with "/" to open overlay
+	m.updateSlashOverlay()
+
 	return m, cmd
+}
+
+func handleSlashOverlayKey(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyUp:
+		if m.slashOverlay.Cursor > 0 {
+			m.slashOverlay.Cursor--
+		}
+		return m, nil
+
+	case tea.KeyDown:
+		if m.slashOverlay.Cursor < len(m.slashOverlay.Commands)-1 {
+			m.slashOverlay.Cursor++
+		}
+		return m, nil
+
+	case tea.KeyEnter, tea.KeyTab:
+		if len(m.slashOverlay.Commands) > 0 {
+			selected := m.slashOverlay.Commands[m.slashOverlay.Cursor]
+			m.slashOverlay = nil
+			_, cmd := m.executeSlashCommand(selected.Name)
+			m.textarea.Reset()
+			return m, cmd
+		}
+		m.slashOverlay = nil
+		return m, nil
+
+	case tea.KeyEsc:
+		m.slashOverlay = nil
+		return m, nil
+	}
+
+	// Pass other keys to textarea, then re-evaluate
+	var cmd tea.Cmd
+	m.textarea, cmd = m.textarea.Update(msg)
+	m.updateSlashOverlay()
+
+	return m, cmd
+}
+
+// updateSlashOverlay opens, updates, or closes the slash overlay based on textarea content.
+func (m *Model) updateSlashOverlay() {
+	val := m.textarea.Value()
+	if !strings.HasPrefix(val, "/") {
+		m.slashOverlay = nil
+		return
+	}
+
+	filtered := slashcmd.Filter(val)
+	if len(filtered) == 0 {
+		m.slashOverlay = nil
+		return
+	}
+
+	cursor := 0
+	if m.slashOverlay != nil {
+		cursor = m.slashOverlay.Cursor
+		if cursor >= len(filtered) {
+			cursor = len(filtered) - 1
+		}
+	}
+
+	m.slashOverlay = &slashcmd.Overlay{
+		Commands: filtered,
+		Cursor:   cursor,
+	}
+}
+
+func handleRewindOverlayKey(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyUp:
+		if m.rewindOverlay.Cursor > 0 {
+			m.rewindOverlay.Cursor--
+		}
+		return m, nil
+
+	case tea.KeyDown:
+		if m.rewindOverlay.Cursor < len(m.rewindOverlay.Items)-1 {
+			m.rewindOverlay.Cursor++
+		}
+		return m, nil
+
+	case tea.KeyEsc:
+		m.rewindOverlay = nil
+		return m, nil
+
+	case tea.KeyEnter:
+		item := m.rewindOverlay.Items[m.rewindOverlay.Cursor]
+		m.rewindOverlay = nil
+
+		// Truncate messages and history to before the selected message
+		m.messages = m.messages[:item.MessageIndex]
+		m.history = m.history[:item.HistoryIndex]
+
+		// Populate textarea with the selected message text
+		m.textarea.SetValue(item.FullText)
+
+		m.saveConversation()
+		m.refreshViewport()
+		return m, nil
+	}
+
+	return m, nil
 }
 
 func handlePermissionKey(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
