@@ -13,6 +13,7 @@ import (
 	"go-tui/config"
 	"go-tui/conversation"
 	"go-tui/llm"
+	"go-tui/tui/slashcmd"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -49,15 +50,6 @@ type ChatEntry struct {
 const maxToolRounds = config.MaxToolRounds
 const maxConsecutiveErrors = 3
 
-// PistonTickMsg drives the piston animation.
-type PistonTickMsg time.Time
-
-func pistonTick() tea.Cmd {
-	return tea.Tick(250*time.Millisecond, func(t time.Time) tea.Msg {
-		return PistonTickMsg(t)
-	})
-}
-
 type Model struct {
 	viewport           viewport.Model
 	textarea           textarea.Model
@@ -83,9 +75,8 @@ type Model struct {
 	totalTokens        int
 	streamingTokens    int
 	streamingThinking  bool
-	pistonFrame        int
-	pistonTicks        int
-	dialogueIndex      int
+	slashOverlay       *slashcmd.Overlay
+	rewindOverlay      *slashcmd.RewindOverlay
 }
 
 // separatorStyle and statusStyle are defined in theme.go
@@ -258,7 +249,7 @@ func parseDiffFromArgs(name, argsJSON, workingDir string) *DiffData {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(textarea.Blink, spinner.Tick, pistonTick())
+	return tea.Batch(textarea.Blink, spinner.Tick)
 }
 
 func (m *Model) updateMarkdownRenderer() {
@@ -359,7 +350,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case LLMResponseMsg:
 		m.streamingTokens = 0
 		m.streamingThinking = false
-		log.Printf("LLMResponseMsg: content=%q toolCalls=%d", msg.Content, len(msg.ToolCalls))
 		if msg.Usage != nil {
 			m.totalTokens = msg.Usage.TotalTokens
 		}
@@ -400,8 +390,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ToolCalls: msg.ToolCalls,
 		})
 
-		// If there's meaningful content alongside tool calls, show it
-		if strings.TrimSpace(msg.Content) != "" {
+		// If there's content alongside tool calls, show it (fixes dropped-content bug)
+		if msg.Content != "" {
 			m.messages = append(m.messages, ChatEntry{
 				Type:    EntryMessage,
 				Role:    "assistant",
@@ -417,6 +407,37 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		cmd := m.dispatchNextTool()
 		return m, cmd
+
+	case CompactResultMsg:
+		m.waiting = false
+		m.textarea.Focus()
+		if msg.Err != nil {
+			m.messages = append(m.messages, ChatEntry{
+				Type:    EntryError,
+				Content: "Compact failed: " + msg.Err.Error(),
+			})
+			m.refreshViewport()
+			return m, nil
+		}
+		m.history = []llm.Message{
+			{
+				Role:    "user",
+				Content: "[Conversation summary]\n" + msg.Summary,
+			},
+		}
+		m.messages = []ChatEntry{
+			{
+				Type:    EntryMessage,
+				Role:    "assistant",
+				Content: "Conversation compacted:\n\n" + msg.Summary,
+			},
+		}
+		if msg.Usage != nil {
+			m.totalTokens = msg.Usage.TotalTokens
+		}
+		m.saveConversation()
+		m.refreshViewport()
+		return m, nil
 
 	case ToolResultMsg:
 		command := msg.ToolName + ": " + msg.Args
@@ -454,14 +475,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.dispatchNextTool()
 		return m, cmd
 
-	case PistonTickMsg:
-		m.pistonFrame = (m.pistonFrame + 1) % len(pistonFrames)
-		m.pistonTicks++
-		if m.pistonTicks%12 == 0 {
-			m.dialogueIndex = (m.dialogueIndex + 1) % len(robotDialogues)
-		}
-		return m, pistonTick()
-
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -489,9 +502,26 @@ func (m *Model) View() string {
 
 	inputArea := m.textarea.View()
 
+	vpView := m.viewport.View()
+
+	if m.rewindOverlay != nil {
+		vpView = m.rewindOverlay.View(m.width, m.viewport.Height)
+	} else if m.slashOverlay != nil {
+		overlay := m.slashOverlay.View(m.width)
+		if overlay != "" {
+			overlayLines := strings.Split(overlay, "\n")
+			vpLines := strings.Split(vpView, "\n")
+			overlayH := len(overlayLines)
+			if overlayH > 0 && len(vpLines) >= overlayH {
+				copy(vpLines[len(vpLines)-overlayH:], overlayLines)
+			}
+			vpView = strings.Join(vpLines, "\n")
+		}
+	}
+
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
-		m.viewport.View(),
+		vpView,
 		statusLine,
 		separator,
 		inputArea,

@@ -37,6 +37,12 @@ type StreamTokenCountMsg struct {
 	ch       <-chan tea.Msg
 }
 
+type CompactResultMsg struct {
+	Summary string
+	Usage   *llm.Usage
+	Err     error
+}
+
 type PermissionDecision int
 
 const (
@@ -122,6 +128,38 @@ func waitForStream(ch <-chan tea.Msg) tea.Cmd {
 				}
 				return msg
 			}
+		}
+	}
+}
+
+func compactHistory(history []llm.Message) tea.Cmd {
+	return func() tea.Msg {
+		messages := []llm.Message{
+			{
+				Role:    "system",
+				Content: "You are a conversation summarizer. Produce a concise summary of the following conversation. Preserve key decisions, code changes, file paths, and important context. Output only the summary, no preamble.",
+			},
+		}
+		// Append the full history as a single user message for context
+		var sb strings.Builder
+		for _, msg := range history {
+			sb.WriteString("[" + msg.Role + "]: ")
+			sb.WriteString(msg.Content)
+			sb.WriteString("\n\n")
+		}
+		messages = append(messages, llm.Message{
+			Role:    "user",
+			Content: sb.String(),
+		})
+
+		result, err := llm.CallLLM(messages, nil)
+		if err != nil {
+			log.Printf("compact error: %v", err)
+			return CompactResultMsg{Err: err}
+		}
+		return CompactResultMsg{
+			Summary: result.Delta.Content,
+			Usage:   result.Usage,
 		}
 	}
 }

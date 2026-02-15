@@ -87,46 +87,8 @@ var (
 	permSelectedStyle = lipgloss.NewStyle().
 				Foreground(colorAmber).
 				Bold(true)
+
 )
-
-// robotFace is a visually square steampunk robot (14w × 7h to account
-// for the ~2:1 terminal character aspect ratio).
-var robotFace = "" +
-	"╔══════⚙═══════╗  \n" +
-	"║  ╭────────╮  ║  \n" +
-	"║  │ ◉    ◉ │  ║  \n" +
-	"║  ╰───▽────╯  ║  \n" +
-	"╠══════╤═══════╣  \n" +
-	"║  ▄▄▐██▌▄▄    ║  \n" +
-	"╚══════╧═══════╝  \n"
-
-var robotStyle = lipgloss.NewStyle().
-	Foreground(colorCopper).
-	MarginLeft(1)
-
-// Piston animation frames (4-frame cycle).
-var pistonFrames = []string{
-	"▄█▀▀█▄╶╴▄█▀▀█▄",
-	"██▄▄██╶╴██▄▄██",
-	"▀█▄▄█▀╶╴▀█▄▄█▀",
-	"██▄▄██╶╴██▄▄██",
-}
-
-var pistonStyle = lipgloss.NewStyle().
-	Foreground(colorBronze)
-
-// Robot dialogue lines — cycles through these for flavor.
-var robotDialogues = []string{
-	"Steam pressure nominal",
-	"Gears turning...",
-	"Boiler temperature stable",
-	"Cogs well-oiled",
-	"Pistons firing smoothly",
-	"Valve pressure steady",
-}
-
-var dialogueStyle = lipgloss.NewStyle().
-	Foreground(colorParchment)
 
 // tokenBarColor returns the appropriate color for the token usage bar.
 func tokenBarColor(ratio float64) lipgloss.Color {
