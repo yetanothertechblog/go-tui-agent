@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"go-tui/config"
-	"go-tui/llm"
 )
 
 const maxDefaultLines = config.MaxDefaultLines
@@ -19,12 +18,11 @@ type ReadFileArgs struct {
 	Limit    int    `json:"limit,omitempty"`
 }
 
-var ReadFileTool = llm.Tool{
-	Type: "function",
-	Function: llm.ToolFunction{
-		Name:        "read_file",
-		Description: "Read the contents of a file. Returns lines with line numbers. Use offset and limit to paginate large files.",
-		Parameters: json.RawMessage(`{
+func init() {
+	Register(Typed[ReadFileArgs]{
+		ToolName:        "read_file",
+		ToolDescription: "Read the contents of a file. Returns lines with line numbers. Use offset and limit to paginate large files.",
+		ToolSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"file_path": {
@@ -42,17 +40,13 @@ var ReadFileTool = llm.Tool{
 			},
 			"required": ["file_path"]
 		}`),
-	},
+		Run: executeReadFile,
+	})
 }
 
-func ExecuteReadFile(argsJSON string, workingDir string) (string, error) {
-	var args ReadFileArgs
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", NewToolErrorWithDetails(ErrInvalidArguments, "invalid arguments", err.Error())
-	}
-
+func executeReadFile(args ReadFileArgs, workingDir string) (ToolResult, error) {
 	if args.FilePath == "" {
-		return "", NewToolError(ErrMissingField, "file_path is required")
+		return ToolResult{}, NewToolError(ErrMissingField, "file_path is required")
 	}
 
 	path := args.FilePath
@@ -62,7 +56,7 @@ func ExecuteReadFile(argsJSON string, workingDir string) (string, error) {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", NewToolErrorWithDetails(ErrFileNotFound, "file not found", err.Error())
+		return ToolResult{}, NewToolErrorWithDetails(ErrFileNotFound, "file not found", err.Error())
 	}
 
 	lines := strings.Split(string(data), "\n")
@@ -73,7 +67,7 @@ func ExecuteReadFile(argsJSON string, workingDir string) (string, error) {
 		offset = 1
 	}
 	if offset > totalLines {
-		return "", NewToolErrorWithDetails(ErrInvalidArguments, "offset exceeds file length",
+		return ToolResult{}, NewToolErrorWithDetails(ErrInvalidArguments, "offset exceeds file length",
 			fmt.Sprintf("offset %d exceeds %d lines", offset, totalLines))
 	}
 
@@ -94,5 +88,5 @@ func ExecuteReadFile(argsJSON string, workingDir string) (string, error) {
 		sb.WriteString(fmt.Sprintf("%4d: %s\n", i+1, lines[i]))
 	}
 
-	return sb.String(), nil
+	return ToolResult{Output: sb.String()}, nil
 }

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"go-tui/config"
-	"go-tui/llm"
 	"go-tui/lsp"
 )
 
@@ -25,12 +24,11 @@ type EditFileResult struct {
 	LSPFeedback string `json:"lsp_feedback,omitempty"`
 }
 
-var EditFileTool = llm.Tool{
-	Type: "function",
-	Function: llm.ToolFunction{
-		Name:        "edit_file",
-		Description: "Edit a file by replacing an exact string match. The old_string must be unique in the file. Read the file first to get the exact text. NOTE: After editing, the system runs LSP diagnostics and provides feedback in the result. If LSP feedback indicates errors, you should fix them in subsequent tool calls.",
-		Parameters: json.RawMessage(`{
+func init() {
+	Register(Typed[EditFileArgs]{
+		ToolName:        "edit_file",
+		ToolDescription: "Edit a file by replacing an exact string match. The old_string must be unique in the file. Read the file first to get the exact text. NOTE: After editing, the system runs LSP diagnostics and provides feedback in the result. If LSP feedback indicates errors, you should fix them in subsequent tool calls.",
+		ToolSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"file_path": {
@@ -48,23 +46,19 @@ var EditFileTool = llm.Tool{
 			},
 			"required": ["file_path", "old_string", "new_string"]
 		}`),
-	},
+		Run: executeEditFile,
+	})
 }
 
-func ExecuteEditFile(argsJSON string, workingDir string) (string, error) {
-	var args EditFileArgs
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", NewToolErrorWithDetails(ErrInvalidArguments, "invalid arguments", err.Error())
-	}
-
+func executeEditFile(args EditFileArgs, workingDir string) (ToolResult, error) {
 	if args.FilePath == "" {
-		return "", NewToolError(ErrMissingField, "file_path is required")
+		return ToolResult{}, NewToolError(ErrMissingField, "file_path is required")
 	}
 	if args.OldString == "" {
-		return "", NewToolError(ErrMissingField, "old_string is required")
+		return ToolResult{}, NewToolError(ErrMissingField, "old_string is required")
 	}
 	if args.OldString == args.NewString {
-		return "", NewToolError(ErrIdenticalContent, "old_string and new_string are identical. No changes needed. Do not retry this edit.")
+		return ToolResult{}, NewToolError(ErrIdenticalContent, "old_string and new_string are identical. No changes needed. Do not retry this edit.")
 	}
 
 	path := args.FilePath
@@ -74,24 +68,24 @@ func ExecuteEditFile(argsJSON string, workingDir string) (string, error) {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", NewToolErrorWithDetails(ErrFileNotFound, "file not found", err.Error())
+		return ToolResult{}, NewToolErrorWithDetails(ErrFileNotFound, "file not found", err.Error())
 	}
 
 	content := string(data)
 	count := strings.Count(content, args.OldString)
 
 	if count == 0 {
-		return "", NewToolError(ErrStringNotFound, "old_string not found in file. The file may have already been edited. Use read_file to check the current content before retrying.")
+		return ToolResult{}, NewToolError(ErrStringNotFound, "old_string not found in file. The file may have already been edited. Use read_file to check the current content before retrying.")
 	}
 	if count > 1 {
-		return "", NewToolErrorWithDetails(ErrStringNotUnique, "old_string found multiple times",
+		return ToolResult{}, NewToolErrorWithDetails(ErrStringNotUnique, "old_string found multiple times",
 			fmt.Sprintf("found %d times, must be unique. Include more surrounding context.", count))
 	}
 
 	newContent := strings.Replace(content, args.OldString, args.NewString, 1)
 
 	if err := os.WriteFile(path, []byte(newContent), config.FilePermissions); err != nil {
-		return "", NewToolErrorWithDetails(ErrFileWrite, "failed to write file", err.Error())
+		return ToolResult{}, NewToolErrorWithDetails(ErrFileWrite, "failed to write file", err.Error())
 	}
 
 	editResult := EditFileResult{
@@ -110,8 +104,8 @@ func ExecuteEditFile(argsJSON string, workingDir string) (string, error) {
 
 	resultJSON, err := json.Marshal(editResult)
 	if err != nil {
-		return "", NewToolErrorWithDetails(ErrJSONMarshal, "failed to marshal result", err.Error())
+		return ToolResult{}, NewToolErrorWithDetails(ErrJSONMarshal, "failed to marshal result", err.Error())
 	}
-	
-	return string(resultJSON), nil
+
+	return ToolResult{Output: string(resultJSON)}, nil
 }

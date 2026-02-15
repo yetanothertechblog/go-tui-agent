@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"go-tui/config"
-	"go-tui/llm"
 	"go-tui/lsp"
 )
 
@@ -15,12 +14,19 @@ type WriteFileArgs struct {
 	Content  string `json:"content"`
 }
 
-var WriteFileTool = llm.Tool{
-	Type: "function",
-	Function: llm.ToolFunction{
-		Name:        "write_file",
-		Description: "Create or overwrite a file with the given content. Parent directories are created automatically. NOTE: The system runs LSP diagnostics on the new content and provides feedback in the result. If LSP feedback indicates errors, you should fix them in subsequent tool calls.",
-		Parameters: json.RawMessage(`{
+type WriteFileResult struct {
+	FilePath    string `json:"file_path"`
+	OldContent  string `json:"old_content"`
+	NewContent  string `json:"new_content"`
+	IsNewFile   bool   `json:"is_new_file"`
+	LSPFeedback string `json:"lsp_feedback,omitempty"`
+}
+
+func init() {
+	Register(Typed[WriteFileArgs]{
+		ToolName:        "write_file",
+		ToolDescription: "Create or overwrite a file with the given content. Parent directories are created automatically. NOTE: The system runs LSP diagnostics on the new content and provides feedback in the result. If LSP feedback indicates errors, you should fix them in subsequent tool calls.",
+		ToolSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"file_path": {
@@ -34,25 +40,13 @@ var WriteFileTool = llm.Tool{
 			},
 			"required": ["file_path", "content"]
 		}`),
-	},
+		Run: executeWriteFile,
+	})
 }
 
-type WriteFileResult struct {
-	FilePath    string `json:"file_path"`
-	OldContent  string `json:"old_content"`
-	NewContent  string `json:"new_content"`
-	IsNewFile   bool   `json:"is_new_file"`
-	LSPFeedback string `json:"lsp_feedback,omitempty"`
-}
-
-func ExecuteWriteFile(argsJSON string, workingDir string) (string, error) {
-	var args WriteFileArgs
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", NewToolErrorWithDetails(ErrInvalidArguments, "invalid arguments", err.Error())
-	}
-
+func executeWriteFile(args WriteFileArgs, workingDir string) (ToolResult, error) {
 	if args.FilePath == "" {
-		return "", NewToolError(ErrMissingField, "file_path is required")
+		return ToolResult{}, NewToolError(ErrMissingField, "file_path is required")
 	}
 
 	path := args.FilePath
@@ -60,7 +54,6 @@ func ExecuteWriteFile(argsJSON string, workingDir string) (string, error) {
 		path = filepath.Join(workingDir, path)
 	}
 
-	// Read existing content before overwriting
 	oldContent := ""
 	isNewFile := true
 	if existing, err := os.ReadFile(path); err == nil {
@@ -70,11 +63,11 @@ func ExecuteWriteFile(argsJSON string, workingDir string) (string, error) {
 
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, config.DirPermissions); err != nil {
-		return "", NewToolErrorWithDetails(ErrFileWrite, "failed to create directory", err.Error())
+		return ToolResult{}, NewToolErrorWithDetails(ErrFileWrite, "failed to create directory", err.Error())
 	}
 
 	if err := os.WriteFile(path, []byte(args.Content), config.FilePermissions); err != nil {
-		return "", NewToolErrorWithDetails(ErrFileWrite, "failed to write file", err.Error())
+		return ToolResult{}, NewToolErrorWithDetails(ErrFileWrite, "failed to write file", err.Error())
 	}
 
 	result := WriteFileResult{
@@ -94,8 +87,8 @@ func ExecuteWriteFile(argsJSON string, workingDir string) (string, error) {
 
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
-		return "", NewToolErrorWithDetails(ErrJSONMarshal, "failed to marshal result", err.Error())
+		return ToolResult{}, NewToolErrorWithDetails(ErrJSONMarshal, "failed to marshal result", err.Error())
 	}
-	
-	return string(resultJSON), nil
+
+	return ToolResult{Output: string(resultJSON)}, nil
 }

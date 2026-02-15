@@ -49,10 +49,10 @@ func (a *Agent) SystemPrompt() string {
 	return fmt.Sprintf(systemPromptTemplate, a.workingDir)
 }
 
-func (a *Agent) ExecuteTool(name, argsJSON string) (string, error) {
+func (a *Agent) ExecuteTool(name, argsJSON string) (tools.ToolResult, error) {
 	return tools.Execute(name, argsJSON, a.workingDir)
 }
 
 func (a *Agent) Tools() []llm.Tool {
-	return tools.All
+	return tools.All()
 }

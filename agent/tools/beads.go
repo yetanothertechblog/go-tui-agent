@@ -7,8 +7,6 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-
-	"go-tui/llm"
 )
 
 type BeadsArgs struct {
@@ -16,12 +14,11 @@ type BeadsArgs struct {
 	Args    string `json:"args"`
 }
 
-var BeadsTool = llm.Tool{
-	Type: "function",
-	Function: llm.ToolFunction{
-		Name:        "beads",
-		Description: "Manage task tracking using beads CLI. When dealing with complex tasks, break them down into small subtasks and use beads to track progress. Use 'bd ready' to find work ready to claim, 'bd create' to create new tasks (break complex tasks into smaller ones), 'bd list' to view all tasks, 'bd show' to view task details and dependencies, 'bd update' to modify task status, 'bd dep add' to add dependencies between tasks, and 'bd close' to complete tasks. Always break down large tasks into smaller, manageable subtasks.",
-		Parameters: json.RawMessage(`{
+func init() {
+	Register(Typed[BeadsArgs]{
+		ToolName:        "beads",
+		ToolDescription: "Manage task tracking using beads CLI. When dealing with complex tasks, break them down into small subtasks and use beads to track progress. Use 'bd ready' to find work ready to claim, 'bd create' to create new tasks (break complex tasks into smaller ones), 'bd list' to view all tasks, 'bd show' to view task details and dependencies, 'bd update' to modify task status, 'bd dep add' to add dependencies between tasks, and 'bd close' to complete tasks. Always break down large tasks into smaller, manageable subtasks.",
+		ToolSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"command": {
@@ -36,20 +33,15 @@ var BeadsTool = llm.Tool{
 			},
 			"required": ["command"]
 		}`),
-	},
+		Run: executeBeads,
+	})
 }
 
-func ExecuteBeads(argsJSON string, workingDir string) (string, error) {
-	var args BeadsArgs
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", NewToolErrorWithDetails(ErrInvalidArguments, "invalid arguments", err.Error())
-	}
-
+func executeBeads(args BeadsArgs, workingDir string) (ToolResult, error) {
 	if args.Command == "" {
-		return "", NewToolError(ErrMissingField, "command is required")
+		return ToolResult{}, NewToolError(ErrMissingField, "command is required")
 	}
 
-	// Build argument list: bd <command> [args...]
 	cmdArgs := strings.Fields(args.Command)
 	if args.Args != "" {
 		cmdArgs = append(cmdArgs, strings.Fields(args.Args)...)
@@ -85,9 +77,9 @@ func ExecuteBeads(argsJSON string, workingDir string) (string, error) {
 		if output == "" {
 			output = "(no output)"
 		}
-		return output, nil
+		return ToolResult{Output: output}, nil
 	case <-time.After(10 * time.Second):
 		cmd.Process.Kill()
-		return "", fmt.Errorf("bd command timed out after 10s")
+		return ToolResult{}, fmt.Errorf("bd command timed out after 10s")
 	}
 }
